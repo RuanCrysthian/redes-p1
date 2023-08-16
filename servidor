@@ -4,18 +4,132 @@ from tcp import Servidor
 import re
 
 
+buffer = b''
+
+todos_nicks = {} #armazena todos os nicks
+todos_canais = {} #armazena todos os canais
+
 def validar_nome(nome):
     return re.match(br'^[a-zA-Z][a-zA-Z0-9_-]*$', nome) is not None
 
 
 def sair(conexao):
+    global todos_nicks
+    global todos_canais
+    nick = todos_nicks[conexao]
+    todos_nicks.pop(conexao)
+    for canal in todos_canais.keys():
+        if nick in todos_canais[canal]:
+            todos_canais[canal].remove(nick)
+            for i in range(len(todos_canais[canal])):
+                aux_conexao = busca_nick(todos_canais[canal][i])
+                aux_conexao.enviar(b':%s QUIT :Connection closed\r\n' %nick)
     print(conexao, 'conexão fechada')
     conexao.fechar()
 
+def busca_nick(nick):
+    global todos_nicks
+    for conexao, lnick in todos_nicks.items():
+        if lnick == nick:
+            return conexao
+
+def entrar_canal(canal, nick):
+    if canal in todos_canais.keys():
+        todos_canais[canal].append(nick)
+    else:
+        todos_canais[canal] = [nick]
+
+def informa_entrada(canal,nick):
+    global todos_canais
+    for i in range(len(todos_canais[canal])):
+        conexao = busca_nick((todos_canais[canal][i]).lower())
+        conexao.enviar(b':%s JOIN :#%s\r\n' % (nick, canal))
 
 def dados_recebidos(conexao, dados):
+    global buffer
+    global todos_nicks
+    global todos_canais
+    dados = buffer + dados
     if dados == b'':
         return sair(conexao)
+    
+    dadosparciais = dados.split(b'\n') #passo2
+    if dados.endswith(b'\n'):
+        buffer = b''
+    else:
+        buffer = dadosparciais[len(dadosparciais)-1]
+    
+    #passo3
+    for i in range(len(dadosparciais)-1):
+        if dadosparciais == b'':
+            return sair(conexao)
+        dadosparciais[i] += b'\n'
+        if dadosparciais[i].startswith(b'NICK'):
+            nick = dadosparciais[i].split(b' ', 1)[1]
+            nick = nick.split(b'\r')[0]
+            if validar_nome(nick):
+                if conexao in todos_nicks.keys(): #troca de nick
+                    if nick.lower() in todos_nicks.values():
+                        conexao.enviar(b':server 433 %s %s :Nickname is already in use\r\n' %(todos_nicks[conexao],nick))
+                    else: 
+                        aux = todos_nicks[conexao]
+                        todos_nicks[conexao] = nick.lower()                       
+                        conexao.enviar(b':%s NICK %s\r\n'%(aux,nick))#passo5 incompleto -- arrumar
+                else: #novo nick
+                    if nick.lower() in todos_nicks.values():
+                        conexao.enviar(b':server 433 * %s :Nickname is already in use\r\n' %nick)
+                    else:
+                        todos_nicks[conexao] = nick.lower()
+                        conexao.enviar(b':server 001 %s :Welcome\r\n' % nick)
+                        conexao.enviar(b':server 422 %s :MOTD File is missing\r\n' % nick)  
+            else:
+                conexao.enviar(b':server 432 * %s :Erroneous nickname\r\n' %nick)
+                
+        elif dadosparciais[i].startswith(b'PING'):
+            conexao.enviar(b':server PONG server :' + dadosparciais[i].split(b' ', 1)[1]) #passo1
+        elif dadosparciais[i].startswith(b'JOIN'):
+            canal = dadosparciais[i].split(b' #',1)[1]
+            canal = canal.split(b'\r')[0]
+            canal = canal.lower()
+            if validar_nome(canal):
+                entrar_canal(canal, todos_nicks[conexao])
+                informa_entrada(canal, todos_nicks[conexao])
+
+                conexao.enviar(b':server 353 %s = #%s :%s\n' %(todos_nicks[conexao], canal, b' '.join(sorted(todos_canais[canal]))))
+                conexao.enviar(b':server 366 %s #%s :End of /NAMES list.\r\n' % (todos_nicks[conexao], canal))
+            else:
+                conexao.enviar(b'server 403 %s :No such channel\r\n' %canal)
+        elif dadosparciais[i].startswith(b'PRIVMSG'):
+
+            destinatario = dadosparciais[i].split(b' ')[1]
+            msg = dadosparciais[i].split(b' :')[1]
+            msg = msg.split(b'\r')[0]
+            if destinatario.startswith(b'#'):
+                destinatario = dadosparciais[i].split(b'#')[1]
+                destinatario = destinatario.split(b' :',1)[0]
+                aux = destinatario.lower()
+                for j in range(len(todos_canais[aux])):
+                    aux_conexao = busca_nick((todos_canais[aux][j]).lower())
+                    if conexao != aux_conexao:
+                        aux_conexao.enviar(b':%s PRIVMSG #%s :%s\r\n' %(todos_nicks[conexao],aux,msg))
+            else:
+                aux = destinatario.lower()
+                if aux in todos_nicks.values():
+                    dest_conexao = busca_nick(aux)
+                    dest_conexao.enviar(b':%s PRIVMSG %s :%s\r\n' %(todos_nicks[conexao],destinatario,msg))
+
+        elif dadosparciais[i].startswith(b'PART'):
+            canal = dadosparciais[i].split(b' ',2)[1]
+            canal = canal.split(b'\r')[0]
+            canal = canal.split(b'#')[1]
+            canal = canal.lower()
+            for j in range(len(todos_canais[canal])):
+                aux = busca_nick(todos_canais[canal][j])
+                aux.enviar(b':%s PART #%s\r\n' %(todos_nicks[conexao],canal))
+            todos_canais[canal].remove(todos_nicks[conexao])
+            
+
+
     print(conexao, dados)
 
 
