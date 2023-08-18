@@ -6,8 +6,8 @@ import re
 
 buffer = b''
 
-todos_nicks = {} #armazena todos os nicks
-todos_canais = {} #armazena todos os canais
+todos_nicks = {} 
+todos_canais = {} 
 
 def validar_nome(nome):
     return re.match(br'^[a-zA-Z][a-zA-Z0-9_-]*$', nome) is not None
@@ -53,7 +53,7 @@ def dados_recebidos(conexao, dados):
     if dados == b'':
         return sair(conexao)
     
-    dadosparciais = dados.split(b'\n') #passo2
+    dadosparciais = dados.split(b'\n')
     if dados.endswith(b'\n'):
         buffer = b''
     else:
@@ -68,14 +68,14 @@ def dados_recebidos(conexao, dados):
             nick = dadosparciais[i].split(b' ', 1)[1]
             nick = nick.split(b'\r')[0]
             if validar_nome(nick):
-                if conexao in todos_nicks.keys(): #troca de nick
+                if conexao in todos_nicks.keys():
                     if nick.lower() in todos_nicks.values():
                         conexao.enviar(b':server 433 %s %s :Nickname is already in use\r\n' %(todos_nicks[conexao],nick))
                     else: 
                         aux = todos_nicks[conexao]
                         todos_nicks[conexao] = nick.lower()                       
-                        conexao.enviar(b':%s NICK %s\r\n'%(aux,nick))#passo5 incompleto -- arrumar
-                else: #novo nick
+                        conexao.enviar(b':%s NICK %s\r\n'%(aux,nick))
+                else:
                     if nick.lower() in todos_nicks.values():
                         conexao.enviar(b':server 433 * %s :Nickname is already in use\r\n' %nick)
                     else:
@@ -86,7 +86,7 @@ def dados_recebidos(conexao, dados):
                 conexao.enviar(b':server 432 * %s :Erroneous nickname\r\n' %nick)
                 
         elif dadosparciais[i].startswith(b'PING'):
-            conexao.enviar(b':server PONG server :' + dadosparciais[i].split(b' ', 1)[1]) #passo1
+            conexao.enviar(b':server PONG server :' + dadosparciais[i].split(b' ', 1)[1])
         elif dadosparciais[i].startswith(b'JOIN'):
             canal = dadosparciais[i].split(b' #',1)[1]
             canal = canal.split(b'\r')[0]
